@@ -1,43 +1,39 @@
-// Valores iniciales: perfil, plantillas de día y plantillas de platos.
+// Valores iniciales: perfil, ajustes, gimnasio, comidas del día y plantillas de platos.
 
 export const DEFAULT_PROFILE = {
-  name: 'Joaquín', sex: 'h', age: 24, height: 168, bodyFat: 32.8,
-  activity: 1.5, rate: 0.75, weighFreq: 3,
+  name: '', sex: 'h', age: null, height: null, bodyFat: null,
+  job: 'sentado', steps: 7000, sportDays: 0,
+  goal: 'perder', rate: 0.5, weighFreq: 3,
   proteinPerKgLbm: 2.2, fatPct: 28,
-  weekendBoost: 15, weekendDays: [6, 0], // sábado y domingo
-  manualTdee: null,
+  weekendBoost: 0, weekendDays: [6, 0],
+  manualTdee: null, activity: 1.4,
 };
 
 export const DEFAULT_SETTINGS = {
-  waterGoal: 3000, glass: 250, stepGoal: 10000,
-  supplements: [{ id: 'creatina', name: 'Creatina 5 g' }, { id: 'whey', name: 'Proteína whey' }],
-  dislikes: ['brócoli', 'coliflor', 'puerro', 'apio'],
+  waterGoal: 2500, glass: 250, stepGoal: 8000,
+  supplements: [],
+  dislikes: [], allergens: [], diet: 'omnivora', shake: true,
+  meals: null, // se genera con mealLayout()
   targetRir: 2,
-  defaultDayType: 'libre',
 };
 
-// Tipos de día. pct = reparto de las calorías del día entre comidas (suman 100).
-export const DEFAULT_DAYTYPES = {
-  libre: { name: 'Libre', slots: [
-    { id: 'des', name: 'Desayuno', time: '10:00', pct: 25, style: 'desayuno' },
-    { id: 'com', name: 'Comida', time: '14:30', pct: 35, style: 'principal' },
-    { id: 'mer', name: 'Merienda', time: '19:00', pct: 12, style: 'batido' },
-    { id: 'cen', name: 'Cena', time: '22:00', pct: 28, style: 'principal' },
-  ] },
-  dia: { name: 'Turno día', slots: [
-    { id: 'des', name: 'Desayuno', time: '8:30', pct: 25, style: 'desayuno' },
-    { id: 'com', name: 'Comida (tupper)', time: '14:00', pct: 33, style: 'principal', tupper: true },
-    { id: 'mer', name: 'Merienda (trabajo)', time: '18:00', pct: 12, style: 'batido', tupper: true },
-    { id: 'cen', name: 'Cena', time: '22:45', pct: 30, style: 'principal' },
-  ] },
-  noche: { name: 'Turno noche', slots: [
-    { id: 'com', name: 'Comida', time: '14:00', pct: 30, style: 'principal' },
-    { id: 'mer', name: 'Merienda', time: '18:00', pct: 12, style: 'batido' },
-    { id: 'cen', name: 'Cena (antes del turno)', time: '21:00', pct: 30, style: 'principal' },
-    { id: 'noc', name: 'Tentempié (tupper)', time: '2:30', pct: 18, style: 'snack', tupper: true },
-    { id: 'lle', name: 'Al llegar (ligero)', time: '10:30', pct: 10, style: 'ligero' },
-  ] },
+export const DEFAULT_GYM = {
+  trains: true, days: 3, experience: 'intermedio', equipment: 'gym', pullupBar: false,
+  injuries: [], avoid: [], sessionMin: 60, goal: 'hipertrofia', split: null,
 };
+
+// Comidas del día según cuántas hace. pct = parte de las calorías del día.
+export function mealLayout(n = 4, shake = true) {
+  const snack = shake ? 'batido' : 'snack';
+  const L = {
+    2: [['com', 'Comida', 50, 'principal'], ['cen', 'Cena', 50, 'principal']],
+    3: [['des', 'Desayuno', 28, 'desayuno'], ['com', 'Comida', 40, 'principal'], ['cen', 'Cena', 32, 'principal']],
+    4: [['des', 'Desayuno', 25, 'desayuno'], ['com', 'Comida', 35, 'principal'], ['mer', 'Merienda', 12, snack], ['cen', 'Cena', 28, 'principal']],
+    5: [['des', 'Desayuno', 22, 'desayuno'], ['mm', 'Media mañana', 10, 'snack'], ['com', 'Comida', 32, 'principal'], ['mer', 'Merienda', 12, snack], ['cen', 'Cena', 24, 'principal']],
+    6: [['des', 'Desayuno', 20, 'desayuno'], ['mm', 'Media mañana', 10, 'snack'], ['com', 'Comida', 28, 'principal'], ['mer', 'Merienda', 12, snack], ['cen', 'Cena', 22, 'principal'], ['rec', 'Antes de dormir', 8, 'ligero']],
+  };
+  return (L[n] || L[4]).map(([id, name, pct, style]) => ({ id, name, pct, style }));
+}
 
 // Plantillas de platos por estilo de comida.
 // Cada componente: { r: rol, g: grupo o id fijo, q: gramos fijos (solo para fijos) }
@@ -69,6 +65,3 @@ export const MEAL_TEMPLATES = {
     { name: 'Tostada con fiambre', parts: [{ r: 'P', g: 'pd' }, { r: 'C', g: 'cd' }] },
   ],
 };
-
-// Alimentos que no se usan en el tupper (mejor recién hechos)
-export const NOT_TUPPER = ['salmon', 'gambas'];

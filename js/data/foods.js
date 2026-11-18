@@ -32,9 +32,19 @@ const RAW = [
   ['burgos0', 'Queso fresco Burgos 0 %', 72, 13, 3.5, 0.5, ['pd'], [['tarrina', 60]]],
   ['curado', 'Queso curado', 400, 26, 0.5, 33, [], [['loncha', 15]]],
   ['whey', 'Proteína whey (polvo)', 390, 78, 6, 6, ['wh'], [['cacito', 30]]],
-  ['lentejas', 'Lentejas cocidas', 116, 9, 20, 0.4, ['cm'], []],
-  ['garbanzos', 'Garbanzos cocidos', 140, 7.5, 21, 2.5, ['cm'], []],
-  ['alubias', 'Alubias cocidas', 115, 7.5, 20, 0.4, [], []],
+  ['lentejas', 'Lentejas cocidas', 116, 9, 20, 0.4, ['cm', 'leg'], []],
+  ['garbanzos', 'Garbanzos cocidos', 140, 7.5, 21, 2.5, ['cm', 'leg'], []],
+  ['alubias', 'Alubias cocidas', 115, 7.5, 20, 0.4, ['leg'], []],
+  // Proteína vegetal y alternativas
+  ['tofu', 'Tofu firme', 144, 17.3, 2.8, 8.7, ['pm', 'pw'], []],
+  ['sojatex', 'Soja texturizada (seca)', 327, 51, 16, 1.2, ['pm'], []],
+  ['seitan', 'Seitán', 130, 25, 4, 2, ['pm', 'pw'], []],
+  ['edamame', 'Edamame', 121, 11.9, 8.9, 5.2, [], []],
+  ['yogsoja', 'Yogur de soja natural', 50, 4.2, 2.5, 2.4, ['pl'], [['unidad', 125]]],
+  ['protveg', 'Proteína vegetal en polvo', 380, 78, 5, 7, ['wh'], [['cacito', 30]]],
+  ['bebsoja', 'Bebida de soja', 39, 3.3, 2.5, 1.8, ['lq'], [['vaso', 250]]],
+  ['lechesl', 'Leche sin lactosa semidesnatada', 46, 3.2, 4.7, 1.6, ['lq'], [['vaso', 250]]],
+  ['pansg', 'Pan sin gluten', 250, 4, 45, 5, ['cd', 'cm'], [['rebanada', 30]]],
   // Lácteos líquidos
   ['lechesemi', 'Leche semidesnatada', 46, 3.2, 4.7, 1.6, ['lq'], [['vaso', 250]]],
   ['lechedes', 'Leche desnatada', 35, 3.4, 4.9, 0.2, ['lq'], [['vaso', 250]]],
@@ -111,6 +121,44 @@ const RAW = [
   ['patfritas', 'Patatas fritas de bolsa', 536, 7, 53, 34.6, [], []],
 ];
 
+// Etiquetas: tipo (carne, pescado, marisco, lacteo, huevo, miel) y alérgenos
+// (gluten, lactosa, huevo, frutos_secos, cacahuete, pescado, marisco, soja). 'alt' = alternativa que el menú
+// solo propone cuando la dieta o las alergias quitan opciones de ese grupo
+const TAGS = {
+  pollo: 'carne', muslo: 'carne', pavo: 'carne', ternera: 'carne', picada5: 'carne', picada20: 'carne', lomo: 'carne',
+  york: 'carne', pavofi: 'carne', serrano: 'carne', chorizo: 'carne', frankfurt: 'carne',
+  merluza: 'pescado', salmon: 'pescado', atun: 'pescado', atunac: 'pescado', gambas: 'marisco',
+  huevo: 'huevo', clara: 'huevo', tortilla: 'huevo', mayonesa: 'huevo',
+  quesobat: 'lacteo lactosa', yogpro: 'lacteo lactosa', skyr: 'lacteo lactosa', yogdes: 'lacteo lactosa', burgos0: 'lacteo lactosa',
+  curado: 'lacteo lactosa', whey: 'lacteo lactosa', lechesemi: 'lacteo lactosa', lechedes: 'lacteo lactosa', lechesl: 'lacteo',
+  mantequilla: 'lacteo lactosa', pizza: 'lacteo lactosa gluten', choco85: 'lactosa',
+  pasta: 'gluten', pastac: 'gluten', cuscus: 'gluten', wrap: 'gluten', pan: 'gluten', panint: 'gluten', panmolde: 'gluten',
+  avena: 'gluten', galletas: 'gluten huevo', cerveza: 'gluten', cerveza0: 'gluten', cereales: 'gluten',
+  almendras: 'frutos_secos', nueces: 'frutos_secos', cacahuetes: 'cacahuete', crcacahuete: 'cacahuete',
+  tofu: 'soja alt', sojatex: 'soja alt', edamame: 'soja', yogsoja: 'soja alt', bebsoja: 'soja alt', miel: 'miel',
+  seitan: 'gluten alt', protveg: 'alt', lechesl: 'lacteo alt', pansg: 'alt',
+};
+
 export const FOODS = RAW.map(([id, name, kcal, p, c, f, groups, units]) => ({
-  id, name, kcal, p, c, f, groups, units: units.map(([n, g]) => ({ n, g })), src: 'base',
+  id, name, kcal, p, c, f, groups, units: units.map(([n, g]) => ({ n, g })), src: 'base', tags: (TAGS[id] || '').split(' ').filter(Boolean),
 }));
+
+export const ALLERGENS = [
+  ['gluten', 'Gluten'], ['lactosa', 'Lactosa'], ['huevo', 'Huevo'], ['frutos_secos', 'Frutos secos'],
+  ['cacahuete', 'Cacahuete'], ['pescado', 'Pescado'], ['marisco', 'Marisco'], ['soja', 'Soja'],
+];
+export const DIETS = [['omnivora', 'Como de todo'], ['pescetariana', 'Pescetariana'], ['vegetariana', 'Vegetariana'], ['vegana', 'Vegana']];
+const DIET_EXCLUDES = { omnivora: [], pescetariana: ['carne'], vegetariana: ['carne', 'pescado', 'marisco'], vegana: ['carne', 'pescado', 'marisco', 'lacteo', 'huevo', 'miel'] };
+
+// ¿Puede comer este alimento según su dieta y alergias?
+export function allowedFood(food, prefs = {}) {
+  const tags = food.tags || [];
+  const ex = DIET_EXCLUDES[prefs.diet || 'omnivora'] || [];
+  if (tags.some(t => ex.includes(t))) return false;
+  if ((prefs.allergens || []).some(a => tags.includes(a))) return false;
+  return true;
+}
+export function allergenWarning(food, prefs = {}) {
+  const hits = (prefs.allergens || []).filter(a => (food.tags || []).includes(a));
+  return hits.map(h => ALLERGENS.find(x => x[0] === h)?.[1] || h);
+}

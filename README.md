@@ -4,15 +4,12 @@ Web instalable (PWA): menú diario con intercambios, contador de calorías con o
 
 ## Qué hace
 
-- **Objetivo adaptativo (tipo MacroFactor)**: parte de una estimación (Katch-McArdle × actividad) y cada semana recalcula tu mantenimiento real comparando lo que comes con la regresión de tus pesajes de las últimas 3 semanas. El cambio se suaviza al 50 % y se limita a ±250 kcal/semana.
-- **Reparto semanal**: mismo total, más margen los días que elijas (por defecto, sábado y domingo +15 %).
-- **Macros**: proteína por kg de masa magra (2,2 g/kg), grasa como % de kcal y el resto, hidratos.
-- **Menú con intercambios**: cada comida se genera con plantillas (proteína + hidrato + verdura + grasa) y los gramos se calculan para cuadrar los macros. ⇄ cambia un alimento por otro equivalente; «Otro plato» genera otro. Excluye lo que no te gusta.
-- **Tipos de día**: Libre, Turno día y Turno noche, cada uno con sus horarios, reparto y comidas de tupper. Todo se puede editar.
-- **Registro**: buscador de alimentos genéricos, escáner de código de barras (Open Food Facts), añadido rápido, alimentos propios, recetas y comidas guardadas.
-- **Gimnasio**: tus 5 rutinas, sesión con temporizador de descanso, serie anterior a la vista, sugerencia de peso/reps (doble progresión con RIR), récords, 1RM estimado, series por músculo e importación del CSV de Hevy.
-- **Progreso**: peso con línea de tendencia, revisión semanal, informe de la semana, medidas y fotos (las fotos solo en el móvil).
-- **Hábitos**: agua, pasos, suplementos y deporte.
+- **Cuestionario inicial**: persona, actividad, objetivo, alimentación (comidas al día, dieta, alergias, alimentos que no gustan, batidos), entrenamiento (días, lugar, material, experiencia, lesiones, ejercicios a evitar) y hábitos. Todo lo opcional se puede completar después en Ajustes → Tu perfil, y al guardar se recalcula todo.
+- **Objetivo adaptativo (tipo MacroFactor)**: parte de una estimación y cada semana recalcula el mantenimiento real con tus pesajes y lo que registras.
+- **Menú del día** que respeta dieta, alergias y gustos, cuadra con tus macros y no repite el alimento principal. «Cambiar plato» muestra una lista de platos con macros parecidos; ⇄ cambia un alimento por otro equivalente.
+- **Añadir comida** en una sola pantalla: buscador con «+» para añadir en un toque, cantidad con atajos, escáner, solo calorías, crear alimento, «igual que ayer» y varias cosas seguidas.
+- **Rutinas generadas** según días, material, experiencia, objetivo y lesiones (cuerpo completo, torso/pierna, empuje/tirón/pierna o por grupos musculares), sesión con temporizador, progresión por RIR, récords e importación de Hevy.
+- **Progreso**: tendencia de peso, revisión semanal, informe, medidas y fotos.
 
 ## 1. Crear el proyecto de Firebase (para la cuenta de Google)
 

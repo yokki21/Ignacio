@@ -1,9 +1,9 @@
 // Service worker: la app funciona sin conexión. Sube VERSION al publicar cambios.
-const VERSION = 'ignacio-v2';
+const VERSION = 'ignacio-v3';
 const FILES = [
   './', './index.html', './css/styles.css', './manifest.webmanifest', './firebase-config.js',
   './js/app.js', './js/ctx.js', './js/nav.js', './js/ui.js', './js/store.js', './js/sync.js',
-  './js/nutrition.js', './js/gym.js', './js/v-food.js', './js/v-gym.js', './js/v-progreso.js', './js/v-ajustes.js',
+  './js/nutrition.js', './js/gym.js', './js/routines.js', './js/v-cuestionario.js', './js/v-food.js', './js/v-gym.js', './js/v-progreso.js', './js/v-ajustes.js',
   './js/data/foods.js', './js/data/exercises.js', './js/data/presets.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
 ];

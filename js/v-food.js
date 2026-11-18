@@ -1,117 +1,225 @@
 // Hojas para añadir comida: buscador, escáner de código de barras, añadido rápido, alimento propio y recetas.
-import { S, N, store, getDay, saveDay, addRecent, dayTypeOf } from './ctx.js';
+import { S, N, store, getDay, saveDay, addRecent, prefs, meals } from './ctx.js';
+import { allergenWarning, allowedFood } from './data/foods.js';
 import { esc, r0, r1, sheet, closeSheet, toast, uid, confirmSheet } from './ui.js';
 import { on, rerender } from './nav.js';
 
 const macroLine = (m) => `<span class="kc">${r0(m.kcal)} kcal</span> · P ${r1(m.p)} · H ${r1(m.c)} · G ${r1(m.f)}`;
 
-function slotOptions(date, selected) {
-  const t = S.dayTypes()[dayTypeOf(date)];
-  return t.slots.map(s => `<option value="${s.id}" ${s.id === selected ? 'selected' : ''}>${esc(s.name)}</option>`).join('') + `<option value="extra" ${selected === 'extra' ? 'selected' : ''}>Extra / picoteo</option>`;
-}
-
 export function addEntry(date, entry) {
   saveDay(date, d => { d.entries.push({ id: uid(), ...entry }); });
 }
+const defaultQty = (food) => store.get('lastqty', {})[food.id] || food.units?.[0]?.g || food.serving || 100;
+function rememberQty(food, g) { store.update('lastqty', {}, o => { o[food.id] = g; }); }
+function warn(food) {
+  const p = prefs();
+  const w = allergenWarning(food, p);
+  if (!allowedFood(food, p)) w.push('no encaja en tu dieta');
+  return w.length ? `<span class="warnchip">⚠ ${esc(w.join(', '))}</span>` : '';
+}
+function qtyLabel(food, g) {
+  const u = food.units?.find(x => Math.abs(g / x.g - Math.round(g / x.g)) < 0.01 && g / x.g <= 6);
+  return u ? `${r1(g / u.g)} ${u.n}` : `${r0(g)} g`;
+}
 
-// ---------- hoja principal ----------
+// ---------- hoja de añadir comida ----------
+// Todo ocurre dentro de la misma hoja: buscar, elegir cantidad, escanear, rápido o crear, y se pueden añadir varias cosas seguidas.
 export function openAddFood(date, slotId) {
-  const html = `
-    <div class="sheet-head"><h3>Añadir comida</h3><button class="icon-btn" data-close>✕</button></div>
-    <div class="tabs" id="af-tabs">
-      <button data-t="buscar" class="on">Buscar</button><button data-t="escanear">Escanear</button>
-      <button data-t="rapido">Rápido</button><button data-t="crear">Crear</button>
-    </div>
-    <div id="af-body"></div>`;
-  sheet(html, {
-    full: true,
-    onMount: (el) => {
-      const body = el.querySelector('#af-body');
-      const tabs = { buscar: tabSearch, escanear: tabScan, rapido: tabQuick, crear: tabCreate };
-      const show = (t) => {
-        el.querySelectorAll('#af-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-        stopScan();
-        tabs[t](body, date, slotId);
-      };
-      on(el, '#af-tabs button', 'click', b => show(b.dataset.t));
-      show('buscar');
-    },
-    onClose: stopScan,
-  });
-}
+  const allMeals = [...meals(), { id: 'extra', name: 'Picoteo' }];
+  const st = { slot: allMeals.some(m => m.id === slotId) ? slotId : allMeals[0].id, q: '', view: 'search', food: null, recipe: null };
+  let el;
+  const added = () => getDay(date).entries.filter(e => e.slot === st.slot);
 
-function tabSearch(body, date, slotId) {
-  body.innerHTML = `<input class="input" id="af-q" placeholder="Busca: pollo, arroz, mis recetas…" autocomplete="off"><div id="af-res" class="list"></div>`;
-  const q = body.querySelector('#af-q');
-  const res = body.querySelector('#af-res');
-  const draw = () => {
-    const custom = S.foods(), recipes = S.recipes();
-    let list;
-    if (!q.value.trim()) {
-      const rec = S.recent().map(id => N.findFood(id, custom) || recipes.find(r => r.id === id)).filter(Boolean);
-      list = [...recipes.map(r => ({ ...r, isRecipe: true })), ...rec.filter(x => !x.items)];
-      if (!list.length) list = N.searchFoods('', custom);
-    } else list = N.searchFoods(q.value, custom, recipes);
-    res.innerHTML = list.map(f => f.isRecipe
-      ? `<button class="li" data-r="${esc(f.id)}"><span><b>${esc(f.name)}</b><small>Receta · ${macroLine(N.recipeMacros(f, custom))} por ración</small></span><span class="chev">›</span></button>`
-      : `<button class="li" data-f="${esc(f.id)}"><span><b>${esc(f.name)}</b><small>${f.brand ? esc(f.brand) + ' · ' : ''}${macroLine(f)} /100 g</small></span><span class="chev">›</span></button>`).join('')
-      || '<p class="muted">Sin resultados. Prueba en «Crear» o «Escanear».</p>';
-    on(res, '[data-f]', 'click', b => amountSheet(date, slotId, N.findFood(b.dataset.f, S.foods())));
-    on(res, '[data-r]', 'click', b => recipeAmount(date, slotId, S.recipes().find(r => r.id === b.dataset.r)));
+  const head = () => `
+    <div class="sheet-head"><h3>Añadir comida</h3><button class="btn sm primary" data-done>Hecho</button></div>
+    <div class="mealtabs">${allMeals.map(m => `<button data-slot="${m.id}" class="${m.id === st.slot ? 'on' : ''}">${esc(m.name)}</button>`).join('')}</div>`;
+  const foot = () => {
+    const a = added(); const t = N.sumMacros(a);
+    return `<div class="af-foot">${a.length ? `En ${esc(allMeals.find(m => m.id === st.slot).name)}: <b>${a.length}</b> · ${r0(t.kcal)} kcal · P ${r0(t.p)} g` : 'Toca <b>+</b> para añadir con la cantidad habitual, o el alimento para elegir cantidad.'}</div>`;
   };
-  q.addEventListener('input', draw);
-  draw();
-  setTimeout(() => q.focus(), 250);
-}
 
-export function amountSheet(date, slotId, food, { onPick } = {}) {
-  if (!food) return;
-  const units = [{ n: 'g', g: 1 }, ...(food.units || [])];
-  if (food.serving) units.push({ n: 'ración', g: food.serving });
-  sheet(`
-    <div class="sheet-head"><h3>${esc(food.name)}</h3><button class="icon-btn" data-close>✕</button></div>
-    ${food.brand ? `<p class="muted small">${esc(food.brand)}</p>` : ''}
-    <div class="row gap">
-      <input class="input" id="am-n" type="number" inputmode="decimal" value="${food.units?.[0] ? 1 : 100}" step="any">
-      <select class="input" id="am-u">${units.map((u, i) => `<option value="${i}" ${food.units?.[0] && i === 1 ? 'selected' : ''}>${esc(u.n)}${u.n !== 'g' ? ` (${u.g} g)` : ''}</option>`).join('')}</select>
-    </div>
-    ${onPick ? '' : `<label class="lbl">Comida</label><select class="input" id="am-slot">${slotOptions(date, slotId)}</select>`}
-    <div class="card soft" id="am-prev"></div>
-    <button class="btn primary block" id="am-ok">${onPick ? 'Añadir ingrediente' : 'Añadir'}</button>`, {
-    onMount: (el, close) => {
-      const n = el.querySelector('#am-n'), u = el.querySelector('#am-u');
-      const grams = () => (parseFloat(n.value) || 0) * units[+u.value].g;
-      const prev = () => { el.querySelector('#am-prev').innerHTML = `${r0(grams())} g → ${macroLine(N.macros(food, grams()))}`; };
-      n.addEventListener('input', prev); u.addEventListener('change', prev); prev();
-      el.querySelector('#am-ok').addEventListener('click', () => {
-        const g = grams();
-        if (g <= 0) return toast('Pon una cantidad');
-        if (onPick) { close(); onPick(food, g); return; }
-        addEntry(date, { slot: el.querySelector('#am-slot').value, foodId: food.id, name: food.name, g, ...N.macros(food, g) });
-        addRecent(food.id);
-        close(); toast('Añadido'); rerender();
-      });
+  const row = (f) => f.isRecipe
+    ? `<div class="frow"><button class="fmain" data-r="${esc(f.id)}"><b>${esc(f.name)}</b><small>Receta · 1 ración · ${macroLine(N.recipeMacros(f, S.foods()))}</small></button><button class="plus" data-qr="${esc(f.id)}">+</button></div>`
+    : `<div class="frow"><button class="fmain" data-f="${esc(f.id)}"><b>${esc(f.name)}</b><small>${f.brand ? esc(f.brand) + ' · ' : ''}${qtyLabel(f, defaultQty(f))} · ${macroLine(N.macros(f, defaultQty(f)))}</small>${warn(f)}</button><button class="plus" data-q="${esc(f.id)}">+</button></div>`;
+
+  const views = {
+    search: () => {
+      const custom = S.foods(), recipes = S.recipes();
+      let body;
+      if (!st.q.trim()) {
+        const rec = S.recent().map(id => N.findFood(id, custom) || recipes.find(r => r.id === id)).filter(Boolean).map(x => (x.items ? { ...x, isRecipe: true } : x));
+        body = `
+          ${rec.length ? `<h4 class="muted small up">Recientes</h4><div class="list">${rec.slice(0, 15).map(row).join('')}</div>` : ''}
+          ${recipes.length ? `<h4 class="muted small up">Mis comidas guardadas</h4><div class="list">${recipes.map(r => row({ ...r, isRecipe: true })).join('')}</div>` : ''}
+          ${!rec.length && !recipes.length ? `<h4 class="muted small up">Sugerencias</h4><div class="list">${N.searchFoods('', custom).slice(0, 12).map(row).join('')}</div>` : ''}`;
+      } else {
+        const res = N.searchFoods(st.q, custom, recipes);
+        body = `<div class="list">${res.map(row).join('')}</div>${!res.length ? '<p class="muted">Sin resultados.</p>' : ''}
+          <button class="btn ghost block" data-view="create">✏️ Crear «${esc(st.q)}»</button>`;
+      }
+      const yest = getDay(N.addDays(date, -1)).entries.filter(e => e.slot === st.slot);
+      return `<div class="searchbar"><input class="input" id="af-q" type="search" placeholder="Busca un alimento o receta" value="${esc(st.q)}" autocomplete="off"></div>
+        <div class="quick4">
+          <button data-view="scan">📷<span>Escanear</span></button><button data-view="quick">⚡<span>Solo kcal</span></button>
+          <button data-view="create">✏️<span>Crear</span></button><button data-copy ${yest.length ? '' : 'disabled'}>📋<span>Igual que ayer</span></button>
+        </div><div id="af-res">${body}</div>`;
     },
-  });
-}
+    amount: () => {
+      const f = st.food; const g0 = defaultQty(f);
+      const units = [{ n: 'g', g: 1 }, ...(f.units || []), ...(f.serving ? [{ n: 'ración', g: f.serving }] : [])];
+      const chipsQ = [...(f.units || []).flatMap(u => [1, 2].map(k => [k * u.g, `${k} ${u.n}`])), ...(f.serving ? [[f.serving, '1 ración']] : []), [50, '50 g'], [100, '100 g'], [150, '150 g'], [200, '200 g']];
+      return `<button class="linkbtn" data-view="search">‹ Volver</button>
+        <h3>${esc(f.name)}</h3>${f.brand ? `<p class="muted small">${esc(f.brand)}</p>` : ''}${warn(f)}
+        <div class="qtyrow"><input class="input big" id="am-n" type="number" inputmode="decimal" step="any" value="${r0(g0)}"><span class="unit">g</span></div>
+        <div class="qchips">${chipsQ.slice(0, 8).map(([g, l]) => `<button type="button" data-g="${g}">${esc(l)}</button>`).join('')}</div>
+        <div class="card soft" id="am-prev"></div>
+        <button class="btn primary block" id="am-ok">Añadir</button>`;
+    },
+    recipe: () => {
+      const r = st.recipe; const m = N.recipeMacros(r, S.foods());
+      return `<button class="linkbtn" data-view="search">‹ Volver</button><h3>${esc(r.name)}</h3>
+        <label class="lbl">Raciones (la receta rinde ${r.servings})</label>
+        <div class="qchips">${[0.5, 1, 1.5, 2].map(k => `<button type="button" data-s="${k}" class="${k === 1 ? 'on' : ''}">${String(k).replace('.', ',')}</button>`).join('')}</div>
+        <input class="input" id="ra-n" type="number" inputmode="decimal" step="0.25" value="1">
+        <div class="card soft" id="ra-prev"></div><button class="btn primary block" id="ra-ok">Añadir</button>`;
+    },
+    scan: () => `<button class="linkbtn" data-view="search">‹ Volver</button>
+      <div class="scan-box"><video id="sc-v" playsinline muted></video><div class="scan-line"></div></div>
+      <p class="muted small" id="sc-st">Apunta al código de barras.</p>
+      <div class="row gap"><input class="input" id="sc-code" inputmode="numeric" placeholder="O escribe el código"><button class="btn" id="sc-go">Buscar</button></div>
+      <p class="muted small">Datos de Open Food Facts. Revisa que cuadren con la etiqueta.</p>`,
+    quick: () => `<button class="linkbtn" data-view="search">‹ Volver</button>
+      <label class="lbl">¿Qué has comido?</label><input class="input" id="q-name" placeholder="Ej.: menú del día" value="${esc(st.q)}">
+      <div class="grid4">
+        <div><label class="lbl">kcal</label><input class="input" id="q-k" type="number" inputmode="decimal"></div>
+        <div><label class="lbl">Prot. g</label><input class="input" id="q-p" type="number" inputmode="decimal"></div>
+        <div><label class="lbl">Hidr. g</label><input class="input" id="q-c" type="number" inputmode="decimal"></div>
+        <div><label class="lbl">Grasa g</label><input class="input" id="q-f" type="number" inputmode="decimal"></div>
+      </div><p class="muted small">Si no sabes los macros, pon solo las calorías.</p>
+      <button class="btn primary block" id="q-ok">Añadir</button>`,
+    create: () => `<button class="linkbtn" data-view="search">‹ Volver</button>` + foodForm({ name: st.q }) + `<button class="btn primary block" id="cf-ok">Guardar y elegir cantidad</button>`,
+  };
 
-function recipeAmount(date, slotId, recipe) {
-  const m = N.recipeMacros(recipe, S.foods());
-  sheet(`
-    <div class="sheet-head"><h3>${esc(recipe.name)}</h3><button class="icon-btn" data-close>✕</button></div>
-    <label class="lbl">Raciones (la receta rinde ${recipe.servings})</label>
-    <input class="input" id="ra-n" type="number" inputmode="decimal" value="1" step="0.25">
-    <label class="lbl">Comida</label><select class="input" id="ra-slot">${slotOptions(date, slotId)}</select>
-    <div class="card soft" id="ra-prev"></div>
-    <button class="btn primary block" id="ra-ok">Añadir</button>`, {
-    onMount: (el, close) => {
-      const n = el.querySelector('#ra-n');
+  const draw = () => {
+    stopScan();
+    el.innerHTML = head() + `<div class="af-body">${views[st.view]()}</div>` + foot();
+    bind();
+  };
+  const refreshFoot = () => { el.querySelector('.af-foot').outerHTML = foot(); };
+  const quickAdd = (food, g) => {
+    addEntry(date, { slot: st.slot, foodId: food.id, name: food.name, g, ...N.macros(food, g) });
+    addRecent(food.id); rememberQty(food, g);
+    toast(`Añadido: ${qtyLabel(food, g)} de ${food.name}`);
+  };
+  const addRecipe = (r, k) => {
+    const m = N.recipeMacros(r, S.foods());
+    addEntry(date, { slot: st.slot, recipeId: r.id, name: r.name, servings: k, g: r0(m.totalG * k), kcal: m.kcal * k, p: m.p * k, c: m.c * k, f: m.f * k });
+    addRecent(r.id); toast(`Añadido: ${r.name}`);
+  };
+
+  function bind() {
+    on(el, '[data-done]', 'click', () => { closeSheet(); });
+    on(el, '[data-slot]', 'click', b => { st.slot = b.dataset.slot; draw(); });
+    on(el, '.quick4 [data-view], .linkbtn[data-view]', 'click', b => { st.view = b.dataset.view; draw(); });
+    on(el, '.quick4 [data-copy]', 'click', () => {
+      const yest = getDay(N.addDays(date, -1)).entries.filter(e => e.slot === st.slot);
+      saveDay(date, d => { yest.forEach(e => d.entries.push({ ...e, id: uid(), fromMenu: false })); });
+      toast(`Copiado: ${yest.length} alimentos de ayer`); refreshFoot();
+    });
+    const q = el.querySelector('#af-q');
+    if (q) {
+      q.addEventListener('input', () => {
+        st.q = q.value;
+        const tmp = document.createElement('div'); tmp.innerHTML = views.search();
+        el.querySelector('#af-res').replaceWith(tmp.querySelector('#af-res'));
+        bind2();
+      });
+    }
+    bind2();
+    if (st.view === 'amount') {
+      const f = st.food, n = el.querySelector('#am-n');
+      const prev = () => { el.querySelector('#am-prev').innerHTML = `${qtyLabel(f, parseFloat(n.value) || 0)} → ${macroLine(N.macros(f, parseFloat(n.value) || 0))}`; };
+      n.addEventListener('input', prev); prev();
+      on(el, '[data-g]', 'click', b => { n.value = b.dataset.g; prev(); });
+      on(el, '#am-ok', 'click', () => {
+        const g = parseFloat(n.value) || 0;
+        if (g <= 0) return toast('Pon una cantidad');
+        quickAdd(f, g); st.view = 'search'; draw();
+      });
+      setTimeout(() => n.select(), 200);
+    }
+    if (st.view === 'recipe') {
+      const r = st.recipe, m = N.recipeMacros(r, S.foods()), n = el.querySelector('#ra-n');
       const k = () => parseFloat(n.value) || 0;
       const prev = () => { el.querySelector('#ra-prev').innerHTML = macroLine({ kcal: m.kcal * k(), p: m.p * k(), c: m.c * k(), f: m.f * k() }); };
       n.addEventListener('input', prev); prev();
-      el.querySelector('#ra-ok').addEventListener('click', () => {
-        addEntry(date, { slot: el.querySelector('#ra-slot').value, recipeId: recipe.id, name: recipe.name, servings: k(), g: r0(m.totalG * k()), kcal: m.kcal * k(), p: m.p * k(), c: m.c * k(), f: m.f * k() });
-        addRecent(recipe.id); close(); toast('Añadido'); rerender();
+      on(el, '[data-s]', 'click', b => { n.value = b.dataset.s; prev(); });
+      on(el, '#ra-ok', 'click', () => { if (k() <= 0) return toast('Pon las raciones'); addRecipe(r, k()); st.view = 'search'; draw(); });
+    }
+    if (st.view === 'scan') {
+      const stEl = el.querySelector('#sc-st');
+      const found = async (code) => {
+        stopScan(); stEl.textContent = 'Buscando ' + code + '…';
+        const food = await lookupBarcode(code, stEl);
+        if (food) { st.food = food; st.view = 'amount'; draw(); }
+      };
+      on(el, '#sc-go', 'click', () => { const c = el.querySelector('#sc-code').value.trim(); if (c) found(c); });
+      startScan(el.querySelector('#sc-v'), found, stEl);
+    }
+    if (st.view === 'quick') {
+      on(el, '#q-ok', 'click', () => {
+        const v = (id) => parseFloat(el.querySelector(id).value) || 0;
+        let kcal = v('#q-k'); const p = v('#q-p'), c = v('#q-c'), f = v('#q-f');
+        if (!kcal) kcal = p * 4 + c * 4 + f * 9;
+        if (!kcal) return toast('Pon al menos las calorías');
+        addEntry(date, { slot: st.slot, name: el.querySelector('#q-name').value.trim() || 'Añadido rápido', g: 0, kcal, p, c, f });
+        toast('Añadido'); st.view = 'search'; st.q = ''; draw();
+      });
+    }
+    if (st.view === 'create') {
+      on(el, '#cf-ok', 'click', () => {
+        const food = readFoodForm(el);
+        if (!food) return;
+        store.set('foods', [food, ...S.foods()]);
+        st.food = food; st.view = 'amount'; draw();
+      });
+    }
+  }
+  function bind2() {
+    const res = el.querySelector('#af-res');
+    if (!res) return;
+    on(res, '[data-f]', 'click', b => { st.food = N.findFood(b.dataset.f, S.foods()); st.view = 'amount'; draw(); });
+    on(res, '[data-r]', 'click', b => { st.recipe = S.recipes().find(r => r.id === b.dataset.r); st.view = 'recipe'; draw(); });
+    on(res, '[data-q]', 'click', b => { const f = N.findFood(b.dataset.q, S.foods()); quickAdd(f, defaultQty(f)); b.classList.add('done'); refreshFoot(); });
+    on(res, '[data-qr]', 'click', b => { addRecipe(S.recipes().find(r => r.id === b.dataset.qr), 1); b.classList.add('done'); refreshFoot(); });
+    on(res, '[data-view]', 'click', b => { st.view = b.dataset.view; draw(); });
+  }
+
+  sheet('<div id="af"></div>', {
+    full: true,
+    onMount: (s) => { el = s.querySelector('#af'); draw(); setTimeout(() => el.querySelector('#af-q')?.focus(), 250); },
+    onClose: () => { stopScan(); rerender(); },
+  });
+}
+
+// cantidad (lo usa el editor de recetas)
+export function amountSheet(date, slotId, food, { onPick } = {}) {
+  if (!food) return;
+  sheet(`
+    <div class="sheet-head"><h3>${esc(food.name)}</h3><button class="icon-btn" data-close>✕</button></div>
+    <div class="qtyrow"><input class="input big" id="am-n" type="number" inputmode="decimal" value="${r0(defaultQty(food))}" step="any"><span class="unit">g</span></div>
+    <div class="qchips">${[...(food.units || []).map(u => [u.g, '1 ' + u.n]), [50, '50 g'], [100, '100 g'], [200, '200 g']].map(([g, l]) => `<button type="button" data-g="${g}">${esc(l)}</button>`).join('')}</div>
+    <div class="card soft" id="am-prev"></div>
+    <button class="btn primary block" id="am-ok">Añadir ingrediente</button>`, {
+    onMount: (el, close) => {
+      const n = el.querySelector('#am-n');
+      const prev = () => { el.querySelector('#am-prev').innerHTML = macroLine(N.macros(food, parseFloat(n.value) || 0)); };
+      n.addEventListener('input', prev); prev();
+      on(el, '[data-g]', 'click', b => { n.value = b.dataset.g; prev(); });
+      el.querySelector('#am-ok').addEventListener('click', () => {
+        const g = parseFloat(n.value) || 0;
+        if (g <= 0) return toast('Pon una cantidad');
+        close(); onPick(food, g);
       });
     },
   });
@@ -121,17 +229,6 @@ function recipeAmount(date, slotId, recipe) {
 let scanStop = null;
 function stopScan() { if (scanStop) { try { scanStop(); } catch { /* */ } scanStop = null; } }
 
-function tabScan(body, date, slotId) {
-  body.innerHTML = `
-    <div class="scan-box"><video id="sc-v" playsinline muted></video><div class="scan-line"></div></div>
-    <p class="muted small" id="sc-st">Apunta al código de barras.</p>
-    <div class="row gap"><input class="input" id="sc-code" inputmode="numeric" placeholder="O escribe el código"><button class="btn" id="sc-go">Buscar</button></div>
-    <p class="muted small">Datos de Open Food Facts. Revisa que los valores cuadren con la etiqueta.</p>`;
-  const st = body.querySelector('#sc-st');
-  const found = async (code) => { stopScan(); st.textContent = 'Buscando ' + code + '…'; await lookupBarcode(code, date, slotId, st); };
-  body.querySelector('#sc-go').addEventListener('click', () => { const c = body.querySelector('#sc-code').value.trim(); if (c) found(c); });
-  startScan(body.querySelector('#sc-v'), found, st);
-}
 
 async function startScan(video, onCode, st) {
   try {
@@ -160,49 +257,27 @@ async function startScan(video, onCode, st) {
   }
 }
 
-async function lookupBarcode(code, date, slotId, st) {
+async function lookupBarcode(code, st) {
   const custom = S.foods();
   const existing = custom.find(f => f.barcode === code);
-  if (existing) return amountSheet(date, slotId, existing);
+  if (existing) return existing;
   try {
-    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_es,brands,nutriments,serving_quantity`);
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_es,brands,nutriments,serving_quantity,allergens_tags`);
     const j = await r.json();
     const p = j.product;
     const nm = p?.nutriments || {};
     const kcal = nm['energy-kcal_100g'] ?? (nm['energy_100g'] ? nm['energy_100g'] / 4.184 : null);
-    if (!p || kcal == null) { st.textContent = 'Producto no encontrado o sin datos. Créalo en «Crear».'; return; }
+    if (!p || kcal == null) { st.textContent = 'Producto no encontrado o sin datos. Créalo con «Crear».'; return null; }
+    const tags = (p.allergens_tags || []).map(t => ({ 'en:gluten': 'gluten', 'en:milk': 'lactosa', 'en:eggs': 'huevo', 'en:nuts': 'frutos_secos', 'en:peanuts': 'cacahuete', 'en:fish': 'pescado', 'en:crustaceans': 'marisco', 'en:soybeans': 'soja' }[t])).filter(Boolean);
     const food = {
-      id: 'off-' + code, barcode: code, src: 'off', groups: [], units: [],
+      id: 'off-' + code, barcode: code, src: 'off', groups: [], units: [], tags,
       name: p.product_name_es || p.product_name || 'Producto ' + code, brand: (p.brands || '').split(',')[0],
       kcal: +kcal, p: +(nm.proteins_100g || 0), c: +(nm.carbohydrates_100g || 0), f: +(nm.fat_100g || 0),
       serving: p.serving_quantity ? +p.serving_quantity : null,
     };
     store.set('foods', [food, ...custom.filter(f => f.id !== food.id)]);
-    amountSheet(date, slotId, food);
-  } catch (e) { console.error(e); st.textContent = 'Sin conexión o error al buscar. Inténtalo de nuevo.'; }
-}
-
-// ---------- rápido ----------
-function tabQuick(body, date, slotId) {
-  body.innerHTML = `
-    <label class="lbl">Descripción</label><input class="input" id="q-name" placeholder="Ej.: menú del día">
-    <div class="grid4">
-      <div><label class="lbl">kcal</label><input class="input" id="q-k" type="number" inputmode="decimal"></div>
-      <div><label class="lbl">Prot. g</label><input class="input" id="q-p" type="number" inputmode="decimal"></div>
-      <div><label class="lbl">Hidr. g</label><input class="input" id="q-c" type="number" inputmode="decimal"></div>
-      <div><label class="lbl">Grasa g</label><input class="input" id="q-f" type="number" inputmode="decimal"></div>
-    </div>
-    <label class="lbl">Comida</label><select class="input" id="q-slot">${slotOptions(date, slotId)}</select>
-    <button class="btn primary block" id="q-ok">Añadir</button>`;
-  body.querySelector('#q-ok').addEventListener('click', () => {
-    const v = (id) => parseFloat(body.querySelector(id).value) || 0;
-    let kcal = v('#q-k');
-    const p = v('#q-p'), c = v('#q-c'), f = v('#q-f');
-    if (!kcal) kcal = p * 4 + c * 4 + f * 9;
-    if (!kcal) return toast('Pon al menos las calorías');
-    addEntry(date, { slot: body.querySelector('#q-slot').value, name: body.querySelector('#q-name').value || 'Añadido rápido', g: 0, kcal, p, c, f });
-    closeSheet(); toast('Añadido'); rerender();
-  });
+    return food;
+  } catch (e) { console.error(e); st.textContent = 'Sin conexión o error al buscar. Inténtalo de nuevo.'; return null; }
 }
 
 // ---------- crear alimento ----------
@@ -227,15 +302,6 @@ export function readFoodForm(el, prev = {}) {
     kcal: v('#cf-k'), p: v('#cf-p') || 0, c: v('#cf-c') || 0, f: v('#cf-f') || 0, serving: v('#cf-s') || null };
 }
 
-function tabCreate(body, date, slotId) {
-  body.innerHTML = foodForm() + `<button class="btn primary block" id="cf-ok">Guardar y añadir</button>`;
-  body.querySelector('#cf-ok').addEventListener('click', () => {
-    const food = readFoodForm(body);
-    if (!food) return;
-    store.set('foods', [food, ...S.foods()]);
-    amountSheet(date, slotId, food);
-  });
-}
 
 // ---------- recetas ----------
 export function openRecipeEditor(recipe = null, prefillItems = null) {

@@ -2,6 +2,7 @@
 import { S, G, N, store, exercise } from './ctx.js';
 import { esc, r0, r1, n0, fdate, sheet, toast, uid, confirmSheet, lineChart, beep } from './ui.js';
 import { rerender, go, on } from './nav.js';
+import { generateRoutines } from './routines.js';
 
 const fmtKg = G.fmtKg;
 const session = () => store.get('session');
@@ -35,7 +36,8 @@ function viewGymHome(root) {
     <header class="top"><h1>Gimnasio</h1><span></span></header>
     ${next ? `<section class="card gymcard"><div><span class="muted small">Te toca</span><b>${esc(next.name)}</b></div><button class="btn primary" data-start="${next.id}">Empezar</button></section>` : ''}
     <h2 class="sec">Rutinas</h2>
-    <div class="list card">${routines.map(r => `<div class="li"><span><b>${esc(r.name)}</b><small>${r.items.length} ejercicios${r.cardio ? ' · ' + esc(r.cardio) : ''}</small></span>
+    ${!routines.length ? `<section class="card"><p>Aún no tienes rutinas.</p><button class="btn primary block" id="gen">Generar mis rutinas</button><p class="muted small">Se crean con tus respuestas de entrenamiento (Ajustes → Tu entrenamiento).</p></section>` : ''}
+    <div class="list card ${routines.length ? '' : 'hidden'}">${routines.map(r => `<div class="li"><span><b>${esc(r.name)}</b><small>${r.items.length} ejercicios${r.cardio ? ' · ' + esc(r.cardio) : ''}</small></span>
       <span class="row gap"><a class="btn sm ghost" href="#/gym/rutina/${r.id}">Editar</a><button class="btn sm" data-start="${r.id}">▶</button></span></div>`).join('')}</div>
     <div class="row gap"><a class="btn ghost grow" href="#/gym/rutina/nueva">+ Nueva rutina</a><button class="btn ghost grow" data-start="">Entreno libre</button></div>
     <h2 class="sec">Series esta semana</h2>
@@ -48,6 +50,11 @@ function viewGymHome(root) {
     }).join('') || '<p class="muted small">Sin entrenos todavía.</p>'}</div>
     <div class="row gap"><a class="btn ghost grow" href="#/gym/ejercicios">Ejercicios y marcas</a><label class="btn ghost grow">Importar de Hevy<input type="file" accept=".csv,text/csv" id="hevy" hidden></label></div>`;
   on(root, '[data-start]', 'click', b => startSession(b.dataset.start));
+  on(root, '#gen', 'click', () => {
+    const { routines: rs, exSettings } = generateRoutines({ ...S.gym(), trains: true });
+    store.set('routines', rs); store.update('exsettings', {}, o => Object.assign(o, exSettings));
+    toast(`${rs.length} rutinas creadas`); rerender();
+  });
   on(root, '#hevy', 'change', i => i.files[0] && importHevy(i.files[0]));
 }
 

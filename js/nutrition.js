@@ -1,6 +1,6 @@
 // Lógica de nutrición: gasto, objetivo adaptativo, macros, alimentos y generador de menús.
-import { FOODS } from './data/foods.js';
-import { MEAL_TEMPLATES, NOT_TUPPER } from './data/presets.js';
+import { FOODS, allowedFood } from './data/foods.js';
+import { MEAL_TEMPLATES } from './data/presets.js';
 
 export const KCAL_PER_KG = 7700;
 
@@ -84,6 +84,14 @@ export function bmr(profile, weight) {
   const s = profile.sex === 'm' ? -161 : 5; // Mifflin-St Jeor
   return 10 * weight + 6.25 * profile.height - 5 * profile.age + s;
 }
+// Factor de actividad a partir del cuestionario (trabajo, pasos, gimnasio y otros deportes)
+export function activityFactor(profile, gym = {}) {
+  const base = { sentado: 1.2, depie: 1.35, fisico: 1.5 }[profile.job] || 1.25;
+  const gymDays = gym.trains === false ? 0 : (gym.days || 0);
+  const steps = Math.min(0.08, Math.max(0, ((profile.steps || 5000) - 5000) / 1000 * 0.01));
+  return Math.round(Math.min(1.9, base + gymDays * 0.03 + (profile.sportDays || 0) * 0.035 + steps) * 100) / 100;
+}
+
 export function initialTdee(profile, weight) {
   if (profile.manualTdee) return profile.manualTdee;
   return Math.round(bmr(profile, weight) * profile.activity);
@@ -91,9 +99,13 @@ export function initialTdee(profile, weight) {
 
 // Calorías medias diarias objetivo (antes del reparto semanal)
 export function baseTarget(profile, plan, weight) {
-  const deficit = (profile.rate / 100) * weight * KCAL_PER_KG / 7;
-  const floor = Math.max(1500, Math.round(bmr(profile, weight) * 0.95));
-  return Math.max(floor, Math.round(plan.tdee - deficit));
+  const goal = profile.goal || 'perder';
+  const rate = goal === 'mantener' ? 0 : (profile.rate || 0) * (goal === 'ganar' ? -1 : 1);
+  const deficit = (rate / 100) * weight * KCAL_PER_KG / 7;
+  const target = Math.round(plan.tdee - deficit);
+  if (deficit <= 0) return target;
+  const floor = Math.max(profile.sex === 'm' ? 1200 : 1500, Math.round(bmr(profile, weight) * 0.95));
+  return Math.max(floor, target);
 }
 
 export function dayTargets(profile, plan, weight, date) {
@@ -148,17 +160,39 @@ export function rng(seedStr) {
 }
 const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 
-function isDisliked(food, dislikes) { return dislikes.some(d => d && norm(food.name).includes(norm(d))); }
+function isDisliked(food, dislikes = []) { return dislikes.some(d => d && norm(food.name).includes(norm(d))); }
 
-export function candidates(groupOrId, { custom = [], dislikes = [], tupper = false } = {}) {
-  const foods = allFoods(custom);
+// Si un grupo se queda vacío por dieta o alergias, se busca en estos
+const FALLBACK_GROUPS = { pd: ['pl', 'pm', 'wh', 'leg'], pl: ['pd', 'pm', 'wh', 'leg'], wh: ['pl', 'pd', 'pm'], pw: ['pm', 'leg'], pm: ['leg', 'wh'], cd: ['cm'], cm: ['cd'], lq: [] };
+
+export function canEat(food, opts = {}) {
+  if (!allowedFood(food, opts)) return false;
+  if (isDisliked(food, opts.dislikes)) return false;
+  if (opts.shake === false && food.groups?.includes('wh')) return false;
+  return true;
+}
+
+export function candidates(groupOrId, opts = {}) {
+  const foods = allFoods(opts.custom);
+  let group = groupOrId;
   const byId = foods.find(f => f.id === groupOrId);
-  if (byId) return [byId];
-  return foods.filter(f => f.groups?.includes(groupOrId) && !isDisliked(f, dislikes) && !(tupper && NOT_TUPPER.includes(f.id)));
+  if (byId) {
+    if (canEat(byId, opts)) return [byId];
+    group = byId.groups[0];
+  }
+  for (const g of [group, ...(FALLBACK_GROUPS[group] || [])]) {
+    const all = foods.filter(f => f.groups?.includes(g));
+    const regular = all.filter(f => !f.tags?.includes('alt'));
+    const okRegular = regular.filter(f => canEat(f, opts));
+    // las alternativas (tofu, bebida de soja, pan sin gluten…) solo entran si la dieta o las alergias quitan algo del grupo
+    const list = okRegular.length === regular.length ? okRegular : all.filter(f => canEat(f, opts));
+    if (list.length) return list;
+  }
+  return [];
 }
 
 const ROLE_KEY = { P: 'p', C: 'c', F: 'f' };
-const LIMITS = { P: [30, 350], C: [0, 400], F: [0, 50] };
+const LIMITS = { P: [30, 400], C: [0, 450], F: [0, 60] };
 
 export function roundGrams(food, g) {
   const u = food.units?.[0];
@@ -190,49 +224,133 @@ function pickWeighted(r, templates) {
   return templates[templates.length - 1];
 }
 
+function scoreItems(items, st) {
+  const t = sumMacros(items);
+  return Math.abs(t.kcal - st.kcal) / Math.max(1, st.kcal) + 0.8 * Math.abs(t.p - st.p) / Math.max(8, st.p);
+}
+
 export function buildMeal(slotTargets, style, seedStr, opts = {}) {
   const r = rng(seedStr);
   const templates = MEAL_TEMPLATES[style] || MEAL_TEMPLATES.principal;
   const tpl = pickWeighted(r, templates);
   const swaps = opts.swaps || {};
-  const parts = tpl.parts.map((part, i) => {
-    const cands = candidates(part.g, opts);
-    const swapId = swaps[i];
-    const food = (swapId && findFood(swapId, opts.custom)) || pick(r, cands.length ? cands : candidates(part.g, { custom: opts.custom }));
-    const g = part.r === 'X' && food ? (part.q <= 5 ? part.q * (food.units?.[0]?.g || 150) : part.q) : 0;
-    return { part, food, idx: i, g };
-  }).filter(x => x.food);
-  const vars = parts.filter(x => x.part.r !== 'X').sort((a, b) => 'PCF'.indexOf(a.part.r) - 'PCF'.indexOf(b.part.r));
-  for (let it = 0; it < 6; it++) {
-    for (const v of vars) {
-      const others = sumMacros(parts.filter(x => x !== v).map(x => macros(x.food, x.g)));
-      const rem = { kcal: slotTargets.kcal - others.kcal, p: slotTargets.p - others.p, c: slotTargets.c - others.c, f: slotTargets.f - others.f };
-      v.g = solveGrams(v.food, v.part.r, rem, false);
+  // candidatos por parte; para objetivos grandes se prefieren alimentos densos (no 800 g de patata)
+  const candList = tpl.parts.map(part => {
+    let cands = candidates(part.g, opts);
+    if (part.r === 'C') { const dense = cands.filter(f => f.c * 4.5 >= slotTargets.c * 0.9); if (dense.length) cands = dense; }
+    if (part.r === 'P') { const dense = cands.filter(f => f.p * 3 >= slotTargets.p * 0.9); if (dense.length) cands = dense; }
+    return cands;
+  });
+  let best = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const parts = tpl.parts.map((part, i) => {
+      // variedad: si se puede, no repetir el alimento principal de otra comida del día
+      const fresh = (part.r === 'P' || part.r === 'C') && opts.avoid ? candList[i].filter(f => !opts.avoid.has(f.id)) : candList[i];
+      const pool = fresh.length ? fresh : candList[i];
+      const food = (swaps[i] && findFood(swaps[i], opts.custom)) || (pool.length ? pick(r, pool) : null);
+      const g = part.r === 'X' && food ? (part.q <= 5 ? part.q * (food.units?.[0]?.g || 150) : part.q) : 0;
+      return { part, food, idx: i, g };
+    }).filter(x => x.food);
+    const items = solveMeal(parts, slotTargets);
+    const score = scoreItems(items, slotTargets);
+    if (!best || score < best.score) best = { items, score };
+    if (score < 0.07) break;
+  }
+  return { template: mealTitle(best.items, style) || tpl.name, items: best.items };
+}
+
+function solveMeal(parts, slotTargets) {
+  let vars = parts.filter(x => x.part.r !== 'X').sort((a, b) => 'PCF'.indexOf(a.part.r) - 'PCF'.indexOf(b.part.r));
+  const solve = () => {
+    for (let it = 0; it < 8; it++) {
+      for (const v of vars) {
+        const others = sumMacros(parts.filter(x => x !== v).map(x => macros(x.food, x.g)));
+        const rem = { kcal: slotTargets.kcal - others.kcal, p: slotTargets.p - others.p, c: slotTargets.c - others.c, f: slotTargets.f - others.f };
+        v.g = solveGrams(v.food, v.part.r, rem, false);
+      }
     }
+  };
+  solve();
+  // cantidades testimoniales (5 g de arroz) se quitan y se recalcula el resto
+  const tiny = vars.filter(v => v.part.r !== 'P' && (v.g * v.food.kcal / 100 < 35 || v.g < 8));
+  if (tiny.length) {
+    tiny.forEach(v => { v.g = 0; });
+    vars = vars.filter(v => !tiny.includes(v));
+    solve();
   }
   const items = [];
   for (const x of parts) {
     const g = x.part.r === 'X' ? x.g : roundGrams(x.food, x.g);
-    if (g <= 0 || (x.part.r === 'F' && g < 3)) continue;
+    if (g <= 0) continue;
     items.push({ idx: x.idx, foodId: x.food.id, name: x.food.name, g, role: x.part.r, group: x.part.g, ...macros(x.food, g) });
   }
-  items.sort((a, b) => a.idx - b.idx);
-  return { template: tpl.name, items };
+  return items.sort((a, b) => a.idx - b.idx);
 }
 
-export function buildDayMenu(dayTypeDef, targets, date, state = {}, opts = {}) {
-  return dayTypeDef.slots.map(slot => {
-    const st = { kcal: targets.kcal * slot.pct / 100, p: targets.p * slot.pct / 100, c: targets.c * slot.pct / 100, f: targets.f * slot.pct / 100 };
+const short = (n) => (/^lechuga/i.test(n) ? 'Ensalada' : n.replace(/\s*\(.*?\)/g, '').split(/ \/ |,/)[0].trim());
+const low = (n) => short(n).charAt(0).toLowerCase() + short(n).slice(1);
+// Nombre del plato a partir de lo que lleva realmente
+export function mealTitle(items, style) {
+  const P = items.find(i => i.role === 'P'), C = items.find(i => i.role === 'C');
+  const veg = items.find(i => i.role === 'X' && ['ve', 'lechuga'].includes(i.group));
+  const fruit = items.find(i => i.role === 'X' && i.group === 'fr');
+  if (!P && !C) return '';
+  if (style === 'batido' && P) return `Batido de ${low(P.name)}${C ? ' + ' + low(C.name) : ''}`;
+  let t;
+  if (style === 'desayuno' && P && C) t = `${short(C.name)} con ${low(P.name)}`;
+  else t = P ? short(P.name) + (C ? ` con ${low(C.name)}` : '') : short(C.name);
+  if (veg) t += ` y ${low(veg.name)}`;
+  if (fruit) t += ` + ${low(fruit.name)}`;
+  return t;
+}
+
+export function slotTargetsOf(slot, targets) {
+  const k = slot.pct / 100;
+  return { kcal: targets.kcal * k, p: targets.p * k, c: targets.c * k, f: targets.f * k };
+}
+
+export function buildDayMenu(meals, targets, date, state = {}, opts = {}) {
+  const avoid = new Set();
+  return meals.map(slot => {
+    const st = slotTargetsOf(slot, targets);
     const seed = `${date}|${slot.id}|${state.seeds?.[slot.id] || 0}`;
-    const meal = buildMeal(st, slot.style, seed, { ...opts, tupper: !!slot.tupper, swaps: state.swaps?.[slot.id] });
+    const meal = buildMeal(st, slot.style, seed, { ...opts, swaps: state.swaps?.[slot.id], avoid });
+    meal.items.filter(i => i.role === 'P' || i.role === 'C').forEach(i => avoid.add(i.foodId));
     return { slot, targets: st, ...meal, totals: sumMacros(meal.items) };
   });
 }
 
+// Platos alternativos para una comida, ordenados por lo bien que cuadran con sus macros
+export function mealAlternatives(slot, targets, date, opts = {}, { n = 8, exclude = null } = {}) {
+  const st = slotTargetsOf(slot, targets);
+  const seen = new Set(exclude ? [exclude] : []);
+  const out = [];
+  for (let seed = 0; seed < 80 && out.length < n * 2; seed++) {
+    const meal = buildMeal(st, slot.style, `${date}|${slot.id}|${seed}`, opts);
+    const key = meal.items.map(i => i.foodId).sort().join(',');
+    if (!meal.items.length || seen.has(key)) continue;
+    seen.add(key);
+    const t = sumMacros(meal.items);
+    const err = Math.abs(t.kcal - st.kcal) / Math.max(1, st.kcal) + Math.abs(t.p - st.p) / Math.max(10, st.p);
+    out.push({ seed, ...meal, totals: t, err, key });
+  }
+  const sorted = out.sort((a, b) => a.err - b.err);
+  const good = sorted.filter(a => a.err < 0.3);
+  return (good.length >= 3 ? good : sorted).slice(0, n);
+}
+export const mealKey = (meal) => meal.items.map(i => i.foodId).sort().join(',');
+
 // Alternativas equivalentes para un componente del plato
 export function swapOptions(item, opts = {}) {
   const fixed = findFood(item.group, opts.custom);
-  const cands = candidates(fixed ? (fixed.groups[0] || item.group) : item.group, opts);
+  const group = fixed ? (fixed.groups[0] || item.group) : item.group;
+  // para intercambiar se ofrecen todas las opciones del grupo (también las alternativas) y, si son pocas, las de grupos parecidos
+  const foods = allFoods(opts.custom);
+  let cands = foods.filter(f => f.groups?.includes(group) && canEat(f, opts));
+  for (const g of FALLBACK_GROUPS[group] || []) {
+    if (cands.filter(f => f.id !== item.foodId).length >= 4) break;
+    cands = [...cands, ...foods.filter(f => f.groups?.includes(g) && canEat(f, opts) && !cands.includes(f))];
+  }
   const key = ROLE_KEY[item.role];
   const base = key ? item[key] : item.kcal;
   return cands.filter(f => f.id !== item.foodId).map(f => {
