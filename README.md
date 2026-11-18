@@ -43,11 +43,11 @@ Con el plan gratuito (Spark) sobra: los datos son pequeños. Las fotos no se sub
 cd ignacio
 git init && git add . && git commit -m "Ignacio v1"
 git branch -M main
-git remote add origin https://github.com/yokki21/ignacio.git   # crea antes el repo vacío en GitHub
+git remote add origin https://github.com/yokki21/Ignacio.git
 git push -u origin main
 ```
 
-En GitHub: **Settings → Pages → Deploy from a branch → main / (root)**. Quedará en `https://yokki21.github.io/ignacio/`.
+En GitHub: **Settings → Pages → Deploy from a branch → main / (root)**. Quedará en `https://yokki21.github.io/Ignacio/`.
 
 En el móvil, abre la URL en Chrome → menú → **Añadir a pantalla de inicio**.
 

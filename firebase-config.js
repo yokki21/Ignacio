@@ -1,10 +1,9 @@
-// Pega aquí la configuración de tu proyecto de Firebase (Consola de Firebase → Configuración del proyecto → Tus apps → Web).
-// Mientras no la pegues, la app funciona igual pero guarda los datos solo en este dispositivo.
+// Configuración del proyecto de Firebase "Ignacio" (es pública por diseño: la seguridad la ponen las reglas de Firestore).
 export const FIREBASE_CONFIG = {
-  apiKey: 'PEGA_AQUI_TU_API_KEY',
-  authDomain: 'tu-proyecto.firebaseapp.com',
-  projectId: 'tu-proyecto',
-  storageBucket: 'tu-proyecto.appspot.com',
-  messagingSenderId: '000000000000',
-  appId: '1:000000000000:web:0000000000000000',
+  apiKey: 'AIzaSyBM6EmSdTDGkFILmrsrCng-U4FgjGYKZY0',
+  authDomain: 'ignacio-468ad.firebaseapp.com',
+  projectId: 'ignacio-468ad',
+  storageBucket: 'ignacio-468ad.firebasestorage.app',
+  messagingSenderId: '55428181989',
+  appId: '1:55428181989:web:70e9e102e79c2d32e9090c',
 };

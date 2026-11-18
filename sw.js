@@ -1,5 +1,5 @@
 // Service worker: la app funciona sin conexión. Sube VERSION al publicar cambios.
-const VERSION = 'ignacio-v1';
+const VERSION = 'ignacio-v2';
 const FILES = [
   './', './index.html', './css/styles.css', './manifest.webmanifest', './firebase-config.js',
   './js/app.js', './js/ctx.js', './js/nav.js', './js/ui.js', './js/store.js', './js/sync.js',
